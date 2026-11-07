@@ -8,16 +8,16 @@ Feature branch of record: `feat/rag-vectorial/jhon-hernandez`.
 
 ## What the service does
 
-1. `api/ingest.py` reads `knowledge_base/**/*.md|pdf`, splits documents into
+1. `app/services/ingest_service.py` reads `knowledge_base/**/*.md|pdf`, splits documents into
    chunks, embeds them with a local Ollama embedding model and persists the
    vectors in ChromaDB on disk (`chroma_db/`).
-2. `api/rag.py` embeds the user question, retrieves the nearest chunks with
+2. `app/services/rag_service.py` embeds the user question, retrieves the nearest chunks with
    cosine distance, applies the hybrid relevance gate and builds a grounded
    prompt.
-3. `api/main.py` exposes the flow through FastAPI, including source/distance
+3. `app/main.py` exposes the flow through FastAPI, including source/distance
    traceability and token streaming.
 4. Ollama generates the answer with a small local chat model. The system
-   prompt (`api/system_prompt.txt`) forces grounding and a fixed refusal.
+   prompt (`app/core/system_prompt.txt`) forces grounding and a fixed refusal.
 
 ## Local hardware budget (READ BEFORE CHOOSING MODELS)
 
@@ -74,14 +74,19 @@ question ──embed(query)──> retrieve top_k ──hybrid gate──> promp
 
 | Path | Role |
 |---|---|
-| `api/config.py` | Single source of env config; loads the repo-root `.env` via python-dotenv and resolves repo-root paths |
-| `api/embeddings.py` | Ollama embed client; nomic document/query prefixes; batching |
-| `api/lexical.py` | Spanish lexical evidence used as the precision gate |
-| `api/ingest.py` | Markdown/PDF chunking, deterministic IDs, prune, upsert, `--reset` |
-| `api/rag.py` | `LocalVectorRAG`: retrieval, gate, prompt, ask/stream |
-| `api/main.py` | FastAPI lifespan, semaphore, canonical endpoints |
-| `api/db/` | Optional PostgreSQL layer: lazy engine, session dependency, models, Pydantic schemas, PQRSD repository, router and business-day deadlines |
-| `api/system_prompt.txt` | Grounding rules and the exact refusal string |
+| `app/core/config.py` | Single source of env config; loads the repo-root `.env` via python-dotenv and resolves repo-root paths |
+| `app/infrastructure/ollama.py` | Ollama embed/chat clients; nomic document/query prefixes; batching |
+| `app/infrastructure/lexical.py` | Spanish lexical evidence used as the precision gate |
+| `app/services/ingest_service.py` | Markdown/PDF chunking, deterministic IDs, prune, upsert, `--reset` |
+| `app/services/rag_service.py` | `LocalVectorRAG` / `RAGService`: retrieval, gate, prompt, ask/stream |
+| `app/main.py` | FastAPI lifespan, semaphore, canonical endpoints |
+| `app/core/bootstrap.py` | Relational schema creation and seed loader |
+| `app/core/database.py` | Optional PostgreSQL layer: lazy engine, session dependency |
+| `app/models/` | SQLAlchemy ORM models |
+| `app/schemas/` | Pydantic schemas with extra='forbid' |
+| `app/repositories/` | Vector and PQRSD repositories |
+| `app/domain/` | Pure business rules and business-day deadlines |
+| `app/core/system_prompt.txt` | Grounding rules and the exact refusal string |
 | `knowledge_base/` | **Only** indexed corpus (`.md` and `.pdf`) |
 | `docs/` | Meta-documentation (`MODELOS.md`, `BENCHMARK.md`, `EVALUACION.md`), not indexed |
 | `scripts/dev.py` | Cross-platform CLI: `setup`, `models`, `ingest`, `api`, `smoke`, `check`, `rubric`, `db-init`; re-executes in `.venv` |
@@ -115,7 +120,7 @@ Linux/macOS when `python` is not on `PATH`, and `py -3` on Windows when the
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server |
 | `OLLAMA_MODEL` | `qwen2.5:3b-instruct-q4_K_M` | Chat model |
 | `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Embedding model; change requires re-index |
-| `API_PORT` | `8000` | Port used by `scripts/dev.py api` and `smoke`; not read by `api/main.py` |
+| `API_PORT` | `8000` | Port used by `scripts/dev.py api` and `smoke`; not read by `app/main.py` |
 | `RAG_TOP_K` | `4` | Retrieved chunks before the gate |
 | `RAG_MAX_DISTANCE` | `0.50` | Cosine distance ceiling |
 | `RAG_STRONG_DISTANCE` | `0.25` | Distance accepted without lexical evidence |
@@ -132,9 +137,9 @@ Linux/macOS when `python` is not on `PATH`, and `py -3` on Windows when the
 | `DB_POOL_TIMEOUT` | `10` | Seconds to wait for a free pooled connection |
 | `DB_CONNECT_TIMEOUT` | `5` | Connect timeout; a dead host answers 503 fast instead of hanging the request |
 | `DB_ECHO` | `false` | Echo generated SQL |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `asistencia` | Compose-only: credentials and database created by the `postgres` service. Not read by `api/config.py` |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `asistencia` | Compose-only: credentials and database created by the `postgres` service. Not read by `app/core/config.py` |
 
-`.env` is optional. `api/config.py` loads it from the repository root with
+`.env` is optional. `app/core/config.py` loads it from the repository root with
 `python-dotenv` at import time; variables already exported in the process
 environment take precedence over the file, and a missing file falls back to the
 defaults above. `.env.example` documents the CPU-tuned values. Never commit
@@ -152,7 +157,7 @@ defaults above. `.env.example` documents the CPU-tuned values. Never commit
 - IDs: `{source}_chunk_{index}_{md5(content)[:8]}`. Re-running ingestion is
   idempotent; stale IDs for an edited source are deleted, and chunks whose
   source file was removed are pruned.
-- `python -m api.ingest --reset` drops and recreates the collection.
+- `python -m app.services.ingest_service --reset` drops and recreates the collection.
 - Metadata values are strings/integers only (Chroma constraint).
 
 ## Retrieval contract (do not simplify to one threshold)
@@ -166,9 +171,9 @@ distance <= RAG_MAX_DISTANCE
 AND (distance <= RAG_STRONG_DISTANCE OR lexical_evidence(query, chunk) > 0)
 ```
 
-- Vector search supplies recall; `api/lexical.py` supplies precision.
+- Vector search supplies recall; `app/infrastructure/lexical.py` supplies precision.
 - `nomic-embed-text` requires `search_document: ` on stored chunks and
-  `search_query: ` on questions. `api/embeddings.py` owns this; never call
+  `search_query: ` on questions. `app/infrastructure/ollama.py` owns this; never call
   Chroma with `query_texts` or attach a Chroma embedding function.
 - Send embeddings explicitly (`upsert(embeddings=...)`,
   `query(query_embeddings=...)`) and use `hnsw:space=cosine`.
@@ -276,7 +281,7 @@ observed.
   PostgreSQL 18.6 server: 28 tables, 9 triggers, the reporting view and the
   seeded catalogs. The rubric bench's database criterion still requires
   `python scripts/dev.py rubric --database-url ... --db-write`.
-- `api/system_prompt.txt` is re-read on every request; context headers are
+- `app/core/system_prompt.txt` is re-read on every request; context headers are
   deliberately placed at the END of each block (source labels first caused the
   3B model to echo the header instead of answering).
 - The list of files is re-scanned on every ingestion; a full-collection
@@ -312,6 +317,6 @@ The task manager is the source of truth for task status.
 - Never commit `.env`, `chroma_db/`, model files or generated caches.
 - Do not change `docker-compose.yml` to a GPU variant on this machine; the
   current file is intentionally CPU-only.
-- Keep the refusal string in `api/system_prompt.txt` exactly:
+- Keep the refusal string in `app/core/system_prompt.txt` exactly:
   `No tengo esa información en mi base local`.
 - Prefer small, reviewable changes that keep tests, docs and behavior together.

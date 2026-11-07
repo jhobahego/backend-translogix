@@ -284,7 +284,7 @@ def check_ai_static(report: Report, rag: object) -> None:
     """Index, model and prompt facts that decide answer quality."""
     import httpx
 
-    from api import config
+    from app.core import config
 
     count = 0
     try:
@@ -304,7 +304,7 @@ def check_ai_static(report: Report, rag: object) -> None:
     # Dimension check: vectors from different embedding models live in
     # different spaces, so a mismatch silently destroys retrieval.
     try:
-        from api.embeddings import OllamaEmbedder
+        from app.infrastructure.ollama import OllamaEmbedder
 
         collection = rag._collection  # noqa: SLF001 - diagnostic read only
         stored = collection.get(include=["embeddings"], limit=1)["embeddings"]
@@ -424,21 +424,21 @@ def check_ai_static(report: Report, rag: object) -> None:
         f"OLLAMA_STREAM_TIMEOUT={config.OLLAMA_STREAM_TIMEOUT:g}",
     )
 
-    prompt = (REPO_ROOT / "api" / "system_prompt.txt").read_text(encoding="utf-8")
+    prompt = (REPO_ROOT / "app" / "core" / "system_prompt.txt").read_text(encoding="utf-8")
     report.add(
         "C1",
         "C1.7",
         "Frase exacta de rechazo en el system prompt",
         PASS if REFUSAL in prompt else FAIL,
-        f"api/system_prompt.txt {'' if REFUSAL in prompt else 'no '}contiene la frase",
+        f"app/core/system_prompt.txt {'' if REFUSAL in prompt else 'no '}contiene la frase",
         True,
     )
 
     # Coverage of the corpus: every file in knowledge_base/ must carry chunks
     # and no chunk may point to a file that no longer exists.
     try:
-        from api import config as runtime_config
-        from api.ingest import _knowledge_base_files  # noqa: PLC2701 - single source
+        from app.core import config as runtime_config
+        from app.services.ingest_service import _knowledge_base_files  # noqa: PLC2701 - single source
 
         # Index metadata stores the path relative to knowledge_base/, which is
         # what `source` must match here.
@@ -477,7 +477,7 @@ def check_ai_static(report: Report, rag: object) -> None:
     # Sector coherence: a citizen-service corpus must talk about citizens,
     # petitions and offices. Files with none of that vocabulary belong to a
     # different exercise and will answer questions the assistant must refuse.
-    from api import config as runtime_config
+    from app.core import config as runtime_config
 
     core = (
         "ciudadano",
@@ -809,7 +809,7 @@ def check_http_contract(report: Report, client: object, db_configured: bool) -> 
             )
 
     # Business logic: business-day deadlines.
-    from api.db.plazos import add_business_days
+    from app.domain.plazos import add_business_days
 
     friday, monday = date(2026, 11, 6), date(2026, 11, 9)
     problems: list[str] = []
@@ -835,7 +835,7 @@ def check_http_contract(report: Report, client: object, db_configured: bool) -> 
     )
 
     # Business logic: the PQRSD state machine.
-    from api.db.schemas import (
+    from app.schemas.pqrsd import (
         SUCCESSOR_STATES,
         EstadoPQRSD,
         PqrsdUpdate,
@@ -942,11 +942,11 @@ def check_http_contract(report: Report, client: object, db_configured: bool) -> 
     # C3.2 - unknown fields are rejected, not ignored. The RAG models are
     # checked statically: sending a valid question would trigger a real
     # generation, which this bench must not do outside --live-ai.
-    from api.main import AskRequest
+    from app.schemas.rag import AskRequest
 
     unknown: list[str] = []
     if AskRequest.model_config.get("extra") != "forbid":
-        unknown.append("api/main.py AskRequest no declara extra='forbid'")
+        unknown.append("app/schemas/rag.py AskRequest no declara extra='forbid'")
     response = client.post(  # type: ignore[attr-defined]
         "/api/v1/pqrsd",
         json={
@@ -1149,7 +1149,7 @@ def check_http_contract(report: Report, client: object, db_configured: bool) -> 
 
     source_text = "\n".join(
         path.read_text(encoding="utf-8", errors="ignore")
-        for path in (REPO_ROOT / "api").rglob("*.py")
+        for path in (REPO_ROOT / "app").rglob("*.py")
     )
     report.add(
         "C3",
@@ -1221,7 +1221,7 @@ def check_database_static(report: Report) -> None:
         report.add(
             "C4",
             "C4.1",
-            "db/schema.sql y api/db/models.py sin diferencias",
+            "db/schema.sql y app/models/pqrsd.py sin diferencias",
             PASS if not problems else FAIL,
             (
                 f"{len(tables)} tablas y "
@@ -1270,7 +1270,7 @@ def check_database_static(report: Report) -> None:
     )
 
     try:
-        from api.db.models import Base
+        from app.models.pqrsd import Base
 
         orm_tables = Base.metadata.tables
         foreign_keys = sum(len(table.foreign_keys) for table in orm_tables.values())
@@ -2185,21 +2185,21 @@ def main(argv: list[str] | None = None) -> int:
         else:
             from fastapi.testclient import TestClient
 
-            from api.main import app
+            from app.main import app
 
             client = TestClient(app)
             client.__enter__()
-            standalone_rag = app.state.rag
+            standalone_rag = getattr(app.state, "rag", None)
     except Exception as exc:  # noqa: BLE001
         print(f"No se pudo iniciar la API en proceso: {_first_line(exc)}", file=sys.stderr)
         return 2
 
     try:
-        from api import config
+        from app.core import config
 
         rag = standalone_rag
         if rag is None:
-            from api.rag import LocalVectorRAG
+            from app.services.rag_service import LocalVectorRAG
 
             rag = LocalVectorRAG()
 

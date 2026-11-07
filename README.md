@@ -43,7 +43,7 @@ pregunta ──embedding──> top_k ──compuerta──> prompt ──Ollama
 | Puertos libres | — | `3000` (Open WebUI), `5432` (PostgreSQL), `8000` (API), `11434` (Ollama) |
 | Disco | ~1 GB libre | Modelo de chat (~2 GB aparte) + embeddings (274 MB) + venv (~530 MB) + índice |
 
-Dependencias de Python (`api/requirements.txt`): `fastapi`, `uvicorn`,
+Dependencias de Python (`requirements.txt`): `fastapi`, `uvicorn`,
 `pydantic`, `httpx`, `chromadb`, `ollama`, `langchain-text-splitters`, `pypdf`,
 `python-dotenv`.
 
@@ -111,7 +111,7 @@ Documentación interactiva: `http://localhost:8000/docs`.
 
 | Comando | Propósito | Opciones |
 | --------- | ----------- | ---------- |
-| `python scripts/dev.py setup` | Crea `.venv`, instala `api/requirements.txt` y copia `.env.example` a `.env` si falta | — |
+| `python scripts/dev.py setup` | Crea `.venv`, instala `requirements.txt` y copia `.env.example` a `.env` si falta | — |
 | `python scripts/dev.py models` | Descarga el modelo de chat y el de embeddings configurados | — |
 | `python scripts/dev.py ingest` | Reconstruye o actualiza el índice vectorial | `--reset` (borra y recrea la colección) |
 | `python scripts/dev.py api` | Inicia uvicorn en `API_PORT` | `--host`, `--port`, `--reload` |
@@ -119,7 +119,7 @@ Documentación interactiva: `http://localhost:8000/docs`.
 | `python scripts/dev.py check` | Verifica Ollama, modelos, `compileall` y `docker compose config` si Docker está instalado | — |
 | `python scripts/dev.py rubric` | Banco de pruebas de la rúbrica KODO TAKAI: contrato HTTP, validación, modelo local y base de datos | `--live-ai`, `--database-url`, `--db-write`, `--json`, `--verbose`, `--strict` |
 
-Los argumentos adicionales se reenvían a `python -m api.ingest` en `ingest` y a
+Los argumentos adicionales se reenvían a `python -m app.services.ingest_service` en `ingest` y a
 `uvicorn` en `api`.
 
 ## Uso sin Docker (Ollama nativo)
@@ -177,11 +177,11 @@ los que ya no corresponden a ningún archivo.
 
 ## Variables de entorno
 
-`api/config.py` carga `.env` desde la raíz del repositorio con `python-dotenv`
+`app/core/config.py` carga `.env` desde la raíz del repositorio con `python-dotenv`
 al importarse. Las variables ya exportadas en el entorno tienen prioridad sobre
 el archivo; si `.env` no existe, se usan los valores por defecto. `API_PORT` lo
 leen `python scripts/dev.py api` y `python scripts/dev.py smoke`, no
-`api/main.py`.
+`app/main.py`.
 
 | Variable | Valor por defecto | Descripción |
 | ---------- | ------------------- | ------------- |
@@ -205,7 +205,7 @@ leen `python scripts/dev.py api` y `python scripts/dev.py smoke`, no
 | `DB_POOL_TIMEOUT` | `10` | Espera máxima por una conexión libre del pool (segundos) |
 | `DB_CONNECT_TIMEOUT` | `5` | Timeout de conexión; una base caída falla rápido en vez de colgar el request |
 | `DB_ECHO` | `false` | Imprime el SQL generado por SQLAlchemy |
-| `POSTGRES_USER` | `asistencia` | Usuario que crea el servicio `postgres` del compose; no lo lee `api/config.py` |
+| `POSTGRES_USER` | `asistencia` | Usuario que crea el servicio `postgres` del compose; no lo lee `app/core/config.py` |
 | `POSTGRES_PASSWORD` | `asistencia` | Clave del mismo usuario; solo para desarrollo local |
 | `POSTGRES_DB` | `asistencia` | Base que crea el servicio `postgres` al inicializarse |
 
@@ -267,10 +267,10 @@ la capa relacional **nunca** los duplica.
 - `db/seed.sql`: catálogos tomados de los manuales (plazos de la Resolución 369
   de 2019, canales, atributos del buen servicio, enfoque diferencial y glosario
   de lenguaje ciudadano).
-- `api/db/models.py`: modelos SQLAlchemy 2.0. `api/db/schemas.py`: contratos
+- `app/models/pqrsd.py`: modelos SQLAlchemy 2.0. `app/schemas/pqrsd.py`: contratos
   Pydantic con `extra="forbid"` y validadores cruzados.
-- `api/db/repository.py`: transacciones, bitácora append-only y máquina de
-  estados. `api/db/plazos.py`: suma de días hábiles con festivos.
+- `app/repositories/pqrsd_repository.py`: transacciones, bitácora append-only y máquina de
+  estados. `app/domain/plazos.py`: suma de días hábiles con festivos.
 
 `db/seed.sql` **no** trae `dependencia`, `sede`, `tramite` ni `festivo`: solo
 canales, tipos de petición, atributos del servicio, categorías diferenciales y

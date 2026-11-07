@@ -20,7 +20,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VENV_DIR = REPO_ROOT / ".venv"
 VENV_PYTHON = VENV_DIR / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-REQUIREMENTS = REPO_ROOT / "api/requirements.txt"
+REQUIREMENTS = REPO_ROOT / "requirements.txt"
 ENV_FILE = REPO_ROOT / ".env"
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
 
@@ -30,9 +30,9 @@ if str(REPO_ROOT) not in sys.path:
 
 EPILOG = """\
 commands:
-  setup   Create .venv, install api/requirements.txt, and create .env if missing.
+  setup   Create .venv, install requirements.txt, and create .env if missing.
   models  Pull the configured chat and embedding models from Ollama.
-  ingest  Rebuild the vector index (extra args go to python -m api.ingest).
+  ingest  Rebuild the vector index (extra args go to python -m app.services.ingest_service).
   api     Run uvicorn on API_PORT (extra args go to uvicorn).
   smoke   Run end-to-end HTTP checks against a running API.
   check   Verify Ollama, models, compileall, and docker compose config.
@@ -82,7 +82,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--port",
         type=int,
         default=None,
-        help="port to bind; defaults to API_PORT from api.config",
+        help="port to bind; defaults to API_PORT from app.core.config",
     )
     api.add_argument(
         "--reload",
@@ -208,7 +208,7 @@ def _models(_args: argparse.Namespace, _extras: list[str]) -> int:
     import httpx
     import ollama
 
-    from api import config
+    from app.core import config
 
     client = ollama.Client(host=config.OLLAMA_BASE_URL)
     for model in (config.OLLAMA_MODEL, config.OLLAMA_EMBED_MODEL):
@@ -234,7 +234,7 @@ def _models(_args: argparse.Namespace, _extras: list[str]) -> int:
 
 def _ingest(args: argparse.Namespace, extras: list[str]) -> int:
     """Run the ingestion module, forwarding --reset and extra arguments."""
-    command = [sys.executable, "-m", "api.ingest"]
+    command = [sys.executable, "-m", "app.services.ingest_service"]
     if args.reset:
         command.append("--reset")
     command.extend(extras)
@@ -243,10 +243,10 @@ def _ingest(args: argparse.Namespace, extras: list[str]) -> int:
 
 def _api(args: argparse.Namespace, extras: list[str]) -> int:
     """Run uvicorn in the foreground with the configured port."""
-    from api import config
+    from app.core import config
 
     port = args.port if args.port is not None else config.API_PORT
-    command = [sys.executable, "-m", "uvicorn", "api.main:app", "--port", str(port)]
+    command = [sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(port)]
     if args.host is not None:
         command.extend(["--host", args.host])
     if args.reload:
@@ -262,7 +262,7 @@ def _smoke(args: argparse.Namespace, _extras: list[str]) -> int:
     """Run end-to-end HTTP checks against a running API."""
     import httpx
 
-    from api import config
+    from app.core import config
 
     base = (
         args.url
@@ -450,7 +450,7 @@ def _check(_args: argparse.Namespace, _extras: list[str]) -> int:
 
     import httpx
 
-    from api import config
+    from app.core import config
 
     failures = 0
     print(f"Python {platform.python_version()} ({sys.executable})")
@@ -492,7 +492,7 @@ def _check(_args: argparse.Namespace, _extras: list[str]) -> int:
                     )
                     failures += 1
 
-    for relative in ("api", "scripts"):
+    for relative in ("app", "scripts"):
         if compileall.compile_dir(str(REPO_ROOT / relative), quiet=1):
             print(f"PASS: compileall {relative}/")
         else:
@@ -532,13 +532,13 @@ def _rubric(_args: argparse.Namespace, extras: list[str]) -> int:
 def _db_init(args: argparse.Namespace, _extras: list[str]) -> int:
     """Create the relational schema, from the models or from db/schema.sql."""
     if args.database_url:
-        # api.config reads DATABASE_URL at import time, so set it before import.
+        # app.core.config reads DATABASE_URL at import time, so set it before import.
         os.environ["DATABASE_URL"] = args.database_url
 
     from sqlalchemy.exc import SQLAlchemyError
 
-    from api.db import bootstrap
-    from api.db import engine as db
+    from app.core import bootstrap
+    from app.core import database as db
 
     db.reset()
     if db.database_url() is None:
@@ -549,7 +549,7 @@ def _db_init(args: argparse.Namespace, _extras: list[str]) -> int:
         return 1
 
     engine = db.get_engine()
-    source = "db/schema.sql" if args.from_schema else "api/db/models.py"
+    source = "db/schema.sql" if args.from_schema else "app/models/pqrsd.py"
 
     try:
         if args.reset:

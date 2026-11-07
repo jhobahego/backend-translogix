@@ -2,7 +2,7 @@
 
 Checks two things without a database server:
 
-1. Every SQLAlchemy table, column and foreign key in ``api/db/models.py`` is
+1. Every SQLAlchemy table, column and foreign key in ``app/models/pqrsd.py`` is
    present in ``db/schema.sql`` (and the other way around).
 2. The Pydantic schemas accept a valid payload and reject the invalid ones that
    matter: unknown fields, malformed email, past due date, half-filled
@@ -80,7 +80,7 @@ def parse_sql_schema() -> dict[str, set[str]]:
 
 
 def compare_sql_and_models() -> list[str]:
-    from api.db.models import Base
+    from app.models.pqrsd import Base
 
     problems: list[str] = []
     sql_tables = parse_sql_schema()
@@ -111,7 +111,7 @@ def compare_sql_and_models() -> list[str]:
 def check_pydantic() -> list[str]:
     from pydantic import ValidationError
 
-    from api.db.schemas import (
+    from app.schemas.pqrsd import (
         CiudadanoCreate,
         CorrespondenciaCreate,
         EncuestaCreate,
@@ -198,8 +198,8 @@ def check_plazos() -> list[str]:
     """Prove the business-day arithmetic and the optional deadline payload."""
     from pydantic import ValidationError
 
-    from api.db.plazos import add_business_days
-    from api.db.schemas import PqrsdCreate
+    from app.domain.plazos import add_business_days
+    from app.schemas.pqrsd import PqrsdCreate
 
     problems: list[str] = []
     friday = date(2026, 11, 6)
@@ -248,7 +248,7 @@ def main() -> int:
         print(f"{len(problems)} problem(s) found")
         return 1
 
-    from api.db.models import Base
+    from app.models.pqrsd import Base
 
     sql_tables = parse_sql_schema()
     columns = sum(len(cols) for cols in sql_tables.values())
